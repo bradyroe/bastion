@@ -1,0 +1,1838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1920, height=1080, initial-scale=1" />
+<title>Bastion // LOCAL</title>
+<style>
+  /* ============================================================
+     Bastion HUD — single-file wallpaper
+     Color + type system
+     ============================================================ */
+  :root{
+    --accent:#45A9E8;
+    --accent-dim:#1F6A9C;
+    --violet:#7B6FA0;
+    --void:#0C0A10;
+    --panel:#110E16;
+    --ink:#DCE6F0;
+    --ink-dim:#7D8794;
+    --ok:#6fae6b;
+    --warn:#d98a2b;
+    --line:rgba(69,169,232,0.18);
+    --line-soft:rgba(69,169,232,0.08);
+    --violet-line:rgba(123,111,160,0.30);
+  }
+
+  *{ box-sizing:border-box; margin:0; padding:0; }
+
+  html,body{
+    width:1920px; height:1080px;
+    background:var(--void);
+    overflow:hidden;
+    color:var(--ink);
+    font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+
+  /* big numerals use a thin sans */
+  .numer{
+    font-family: Inter, "Helvetica Neue", system-ui, sans-serif;
+    font-weight:100;
+    font-variant-numeric: tabular-nums;
+    letter-spacing:-0.01em;
+  }
+
+  .mono{
+    font-family: ui-monospace, "JetBrains Mono", monospace;
+    text-transform:uppercase;
+    letter-spacing:0.3em;
+  }
+
+  #stage{
+    position:relative;
+    width:1920px; height:1080px;
+    overflow:hidden;
+  }
+
+  /* ----------------- ambient overlays ----------------- */
+  .overlay{ position:absolute; inset:0; pointer-events:none; z-index:50; }
+
+  #vignette{
+    background: radial-gradient(ellipse 70% 70% at 50% 50%,
+      rgba(0,0,0,0) 35%, rgba(0,0,0,0.55) 85%, rgba(0,0,0,0.85) 100%);
+    z-index:40;
+  }
+  #scanlines{
+    background:repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.10) 3px,
+      rgba(0,0,0,0) 4px
+    );
+    opacity:0.15;
+    z-index:45;
+    mix-blend-mode:multiply;
+  }
+  /* film grain disabled — looked muddy stretched across a real 1080p panel */
+  #grain{ display:none; }
+
+  /* faint hex grid background */
+  #hexbg{ position:absolute; inset:0; z-index:1; opacity:0.20; }
+
+  /* ----------------- layout frame ----------------- */
+  #frame{ position:absolute; inset:24px; z-index:10; }
+
+  .corner{
+    position:absolute; width:54px; height:54px;
+    border:1px solid var(--line);
+  }
+  .corner.tl{ top:0; left:0; border-right:0; border-bottom:0; }
+  .corner.tr{ top:0; right:0; border-left:0; border-bottom:0; }
+  .corner.bl{ bottom:0; left:0; border-right:0; border-top:0; }
+  .corner.br{ bottom:0; right:0; border-left:0; border-top:0; }
+
+  /* ----------------- header ----------------- */
+  #header{
+    position:absolute; top:46px; left:64px; right:64px; z-index:20;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .wordmark{ font-size:22px; letter-spacing:0.42em; color:var(--ink); }
+  .wordmark .slash{ color:var(--accent-dim); }
+  .wordmark .loc{ color:var(--accent); }
+
+  .conn{
+    display:flex; align-items:center; gap:12px;
+    font-size:12px; color:var(--ink-dim); letter-spacing:0.3em;
+  }
+  .dot{
+    width:9px; height:9px; border-radius:50%;
+    background:var(--ok);
+    box-shadow:0 0 10px var(--ok);
+    animation:pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+  /* ----------------- generic panel ----------------- */
+  .panel{
+    position:absolute; z-index:15;
+    background:linear-gradient(180deg, rgba(17,14,22,0.82), rgba(12,10,16,0.72));
+    border:1px solid var(--line-soft);
+    backdrop-filter: blur(2px);
+  }
+  .panel::before, .panel::after{
+    content:""; position:absolute; width:14px; height:14px; pointer-events:none;
+    border-color:var(--line); border-style:solid; border-width:0;
+  }
+  .panel::before{ top:-1px; left:-1px; border-top-width:1px; border-left-width:1px; }
+  .panel::after{ bottom:-1px; right:-1px; border-bottom-width:1px; border-right-width:1px; }
+
+  .panel-h{
+    font-size:10.5px; color:var(--accent); letter-spacing:0.34em;
+    padding:10px 14px; border-bottom:1px solid var(--line-soft);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .panel-h .tag{ color:var(--ink-dim); }
+  .panel-b{ padding:14px; }
+
+  .lbl{ font-size:9.5px; color:var(--ink-dim); letter-spacing:0.3em; }
+
+  /* ----------------- clock ----------------- */
+  #clockPanel{ left:64px; top:104px; width:430px; height:168px; }
+  #clock{ font-size:84px; line-height:1; color:var(--ink); }
+  #clock .colon{ color:var(--accent); }
+  #clock .colon.off{ opacity:0.12; }
+  #dateLine{ margin-top:14px; font-size:12px; color:var(--ink-dim); letter-spacing:0.34em; }
+
+  /* ----------------- gauges ----------------- */
+  #gaugePanel{ left:64px; top:296px; width:430px; height:420px; }
+  .gaugeGrid{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .gauge{
+    position:relative; display:flex; flex-direction:column; align-items:center;
+    padding:10px 4px 6px;
+  }
+  .gauge canvas{ display:block; }
+  .gauge .gv{
+    position:absolute; top:60px; left:0; right:0; text-align:center;
+    font-size:30px; color:var(--ink);
+  }
+  .gauge .gv small{ font-size:13px; color:var(--ink-dim); }
+  .gauge .gl{ margin-top:6px; font-size:10px; color:var(--accent); letter-spacing:0.3em; }
+  .badge{
+    margin-top:5px; font-size:9px; color:var(--ink-dim);
+    border:1px solid var(--line-soft); padding:2px 7px; letter-spacing:0.18em;
+  }
+  .badge b{ color:var(--ink); font-weight:400; }
+
+  /* ----------------- center reactor -----------------
+     Lifted off dead-centre (was top:50%) to open the band underneath for the
+     turn stage. The canvas geometry is unchanged — only where it sits. */
+  #centerWrap{
+    position:absolute; left:50%; top:430px; transform:translate(-50%,-50%);
+    z-index:12; width:620px; height:620px;
+    display:flex; align-items:center; justify-content:center;
+    transition:opacity .45s ease;
+  }
+  /* The detail panel sits over the reactor, and a reactor half-covered by a
+     panel reads as debris rather than as ornament — so it fades out entirely
+     while there is an answer to read, and comes back when the panel clears. */
+  #stage.detail-on #centerWrap{ opacity:0; }
+  #reactor{ display:block; }
+
+  /* ----------------- THE TURN STAGE (ported 2026-08-17) -----------------
+     The vertical HUD gained a live turn display; this is the landscape port.
+     Same four questions in the same order of visual weight — what is it
+     doing, how long has it been doing it, what did it hear, where in the turn
+     is it — but as a wide strip in the gap between the two panel columns,
+     because that is the shape the space here actually has.
+     Sized smaller than the vertical (40/24/19px vs 54/30/26px) on purpose:
+     this is the working monitor at desk distance, not a panel read from two
+     metres, and it is mostly behind windows. Between turns it goes dark and
+     still rather than animating at him all day. */
+  #turnStage{
+    position:absolute; left:520px; right:520px; top:756px; height:214px;
+    z-index:16;
+    border:1px solid var(--line-soft);
+    background:linear-gradient(180deg, rgba(69,169,232,0.035), rgba(12,10,16,0.70));
+    padding:13px 22px 12px;
+    display:flex; flex-direction:column;
+    transition:border-color .5s;
+  }
+  #turnStage.busy{ border-color:rgba(69,169,232,0.34); }
+  #turnStage::before, #turnStage::after{
+    content:""; position:absolute; width:14px; height:14px; pointer-events:none;
+    border-color:var(--line); border-style:solid; border-width:0;
+  }
+  #turnStage::before{ top:-1px; left:-1px; border-top-width:1px; border-left-width:1px; }
+  #turnStage::after{ bottom:-1px; right:-1px; border-bottom-width:1px; border-right-width:1px; }
+
+  .stage-top{ display:flex; justify-content:space-between; align-items:center; height:13px; }
+  .stage-top .k{ font-size:10px; letter-spacing:0.32em; color:var(--ink-dim); text-transform:uppercase; }
+  .stage-top .live{ display:flex; align-items:center; gap:8px; font-size:10px; letter-spacing:0.28em; color:var(--accent); text-transform:uppercase; }
+  .stage-top .mini{
+    width:6px; height:6px; border-radius:50%; background:var(--accent);
+    animation:blink 1.1s steps(1) infinite; opacity:0; transition:opacity .3s;
+  }
+  #turnStage.busy .mini{ opacity:1; }
+
+  /* The verb, and beside it the elapsed counter — the difference between
+     "it is working" and "it has hung". */
+  .stage-status{ margin-top:8px; height:46px; display:flex; align-items:baseline; gap:20px; }
+  #verb{
+    font-family: Inter,"Helvetica Neue",system-ui,sans-serif;
+    font-size:40px; font-weight:200; line-height:1;
+    letter-spacing:0.05em; text-transform:uppercase;
+    color:var(--ink-dim); transition:color .45s; white-space:nowrap;
+  }
+  #turnStage.busy #verb{ color:var(--accent); }
+  #elapsed{
+    font-family: Inter,"Helvetica Neue",system-ui,sans-serif;
+    font-size:24px; font-weight:300; line-height:1;
+    color:var(--accent-dim); font-variant-numeric:tabular-nums;
+    letter-spacing:0.03em; opacity:0; transition:opacity .3s, color .8s;
+  }
+  #elapsed.on{ opacity:1; }
+  /* Warm orange past ten seconds, deliberately not red: a long think is slow,
+     not broken. */
+  #elapsed.slow{ color:var(--warn); }
+
+  /* THE THOUGHT METER — how MUCH reasoning has arrived, beside how LONG it has
+     been going. The elapsed counter cannot tell a 29-second think from a hang;
+     both are a number going up. A reasoning count that is still climbing can,
+     and it beats a spinner, which spins just as happily on a dead process.
+     Scoped to THINKING, like the reasoning strip. */
+  .thought{
+    margin-left:auto; align-self:baseline;
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+    font-size:15px; letter-spacing:0.04em;
+    color:var(--violet); font-variant-numeric:tabular-nums;
+    display:flex; align-items:center; gap:7px;
+    opacity:0; transition:opacity .35s;
+  }
+  .thought.on{ opacity:0.92; }
+  .thought .tpip{
+    width:7px; height:7px; border-radius:50%; flex:0 0 auto;
+    background:var(--violet); box-shadow:0 0 8px rgba(123,111,160,0.8);
+    animation:tpulse 1.1s ease-in-out infinite;
+  }
+  .thought .tunit{ font-size:10px; letter-spacing:0.22em; color:var(--ink-dim); text-transform:uppercase; }
+  /* Nothing new for a few seconds: a hollow pip and no word. A pause here is
+     usually a tool call or the answer starting, not a fault, and the count is
+     still on screen saying how far it got. */
+  .thought.stale .tpip{ background:transparent; box-shadow:none;
+                        border:1px solid var(--violet); opacity:0.55; animation:none; }
+  @keyframes tpulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
+
+  /* What Whisper heard, the instant it exists — so a misheard question is
+     obvious during the think rather than after the answer. */
+  #heardLine{
+    margin-top:6px; height:26px; overflow:hidden; white-space:nowrap;
+    text-overflow:ellipsis;
+    font-family: Inter,"Helvetica Neue",system-ui,sans-serif;
+    font-size:19px; line-height:1.35; color:#E4EDF7;
+  }
+  #heardLine .hw{
+    color:var(--violet); font-size:11px; letter-spacing:0.24em;
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+  }
+  #heardLine.hint{ font-size:13px; color:var(--ink-dim); letter-spacing:0.16em; text-transform:uppercase; }
+
+  /* live reasoning stream ("watch it think") — inside the stage now, and
+     scoped to THINKING. As a free-floating 860px overlay it stayed on screen
+     through SPEAKING, which is both stale and in the way. */
+  #reasoning{
+    margin-top:6px; height:38px; overflow:hidden;
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+    font-size:12.5px; line-height:1.5; letter-spacing:0.02em;
+    color:var(--violet);
+    white-space:pre-wrap; word-break:break-word;
+    opacity:0; transition:opacity .45s;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 62%, transparent 100%);
+            mask-image: linear-gradient(to bottom, #000 0, #000 62%, transparent 100%);
+  }
+  #reasoning.on{ opacity:0.92; }
+  #reasoning .rlabel{ font-size:9px; letter-spacing:0.36em; color:var(--accent); margin-right:8px; opacity:0.85; }
+  #reasoning .rcaret{ color:var(--accent); animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0.25; } }
+
+  /* THE RUNNING TOOL. A 105.8 s turn on 2026-08-18 was spent in tv_control ->
+     look_at_screen -> tv_control, and under the SPLIT thinking policy those
+     rounds reason not at all — so the stage sat on THINKING with an empty
+     reasoning strip for a hundred seconds, which reads as hung. The NAME only:
+     arguments carry his words, file paths and clipboard text, and this is a
+     wallpaper. Fits in the stage's existing slack (26px of 214), so nothing
+     else here moves. */
+  #toolLine{
+    height:0; overflow:hidden; opacity:0;
+    display:flex; align-items:center; gap:9px;
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+    color:var(--accent); transition:opacity .3s;
+  }
+  #toolLine.on{ height:20px; margin-top:6px; opacity:1; }
+  #toolLine .tl-pip{
+    width:7px; height:7px; border-radius:50%; flex:0 0 auto;
+    background:var(--accent); box-shadow:0 0 8px rgba(69,169,232,0.8);
+    animation:tpulse 1.1s ease-in-out infinite;
+  }
+  #toolLine .tl-lab{ font-size:10px; letter-spacing:0.22em; color:var(--ink-dim); text-transform:uppercase; }
+  #toolLine .tl-name{ font-size:15px; letter-spacing:0.03em; white-space:nowrap;
+                      overflow:hidden; text-overflow:ellipsis; }
+  #toolLine .tl-el{ margin-left:auto; font-size:13px; color:var(--accent-dim);
+                    font-variant-numeric:tabular-nums; }
+  /* Finished, but still up until the state leaves thinking: "it just did this"
+     while the model phrases the answer. */
+  #toolLine.done{ color:var(--accent-dim); }
+  #toolLine.done .tl-pip{ background:transparent; box-shadow:none;
+                          border:1px solid var(--accent-dim); opacity:0.55; animation:none; }
+
+  /* The rail: HEARD -> THINKING -> ANSWERING -> SPEAKING. Four dots, no
+     connecting line — a bar would imply a known duration, and not knowing the
+     duration is the entire problem. */
+  #rail{ margin-top:auto; display:flex; justify-content:space-between; align-items:center; height:20px; }
+  .rail-step{ display:flex; align-items:center; gap:8px; }
+  .rs-dot{
+    width:8px; height:8px; border-radius:50%; flex:0 0 auto;
+    background:transparent; border:1px solid var(--accent-dim); opacity:0.45;
+    transition:background .35s, opacity .35s, box-shadow .35s, border-color .35s;
+  }
+  .rs-lab{
+    font-size:10.5px; letter-spacing:0.26em; color:var(--ink-dim);
+    text-transform:uppercase; transition:color .35s;
+  }
+  .rail-step.done .rs-dot{ background:var(--accent-dim); border-color:var(--accent-dim); opacity:0.85; }
+  .rail-step.done .rs-lab{ color:var(--accent-dim); }
+  .rail-step.now .rs-dot{
+    background:var(--accent); border-color:var(--accent); opacity:1;
+    box-shadow:0 0 9px rgba(69,169,232,0.75);
+  }
+  .rail-step.now .rs-lab{ color:var(--accent); }
+
+  /* ---- THE QUEUE: "heard you, you are next" ----
+     Measured 2026-08-17: a second question asked nine seconds into an
+     eighteen-second think waited for the first, correctly and silently. the owner
+     read the silence as a hang. What was missing is ACKNOWLEDGEMENT, and it has
+     to sit BESIDE the running turn rather than replace it — both facts are true
+     at once, and the one he could not see is this one.
+
+     Placed in the LEFT COLUMN, level with the stage. That band (x 64–494,
+     y 716–1004) is the only genuinely empty region on this screen: the gauge
+     panel ends at 716 and the footer starts at 1004. Above the stage is the
+     reactor (bottom edge 740) and below it is 34px of gap before the footer —
+     neither fits, and growing the stage would have meant moving the reactor.
+
+     Violet, not accent: accent here means "doing this now", and the queue is what
+     Bastion is NOT doing yet. display:none when empty, so between turns this
+     screen is byte-for-byte what it was — no reserved empty box, which is the
+     defect both panels here have already been fixed for once. */
+  #queueBar{
+    position:absolute; left:64px; top:756px; width:430px; z-index:16;
+    border:1px solid rgba(123,111,160,0.40);
+    border-left:3px solid var(--violet);
+    background:linear-gradient(90deg, rgba(123,111,160,0.11), rgba(12,10,16,0.62));
+    padding:12px 16px 14px;
+    display:none;
+  }
+  #queueBar.on{ display:block; }
+  .q-top{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .q-lab{
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+    font-size:10px; letter-spacing:0.26em; text-transform:uppercase;
+    color:var(--violet); white-space:nowrap;
+  }
+  .q-wait{
+    font-family: Inter,"Helvetica Neue",system-ui,sans-serif;
+    font-size:18px; font-weight:300; line-height:1; color:var(--violet);
+    font-variant-numeric:tabular-nums;
+  }
+  /* The waiting question, when it is known — often it is not, because a wake
+     word queues before Whisper has run, and the count alone already answers
+     "did you hear me". Empty collapses rather than reserving space. */
+  .q-text{
+    margin-top:8px;
+    font-family: Inter,"Helvetica Neue",system-ui,sans-serif;
+    font-size:16px; line-height:1.32; color:#DCE6F0;
+    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+  .q-text:empty{ display:none; }
+  .q-text .qw{
+    color:var(--violet); font-size:10px; letter-spacing:0.24em;
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+  }
+
+  /* ---- WHICH BRAIN, AND HOW MUCH OF IT IS LEFT ----
+     Bastion can answer from the LOCAL model or from CLAUDE. In local mode his
+     speech stays on this machine; in Claude mode it does not. So this is
+     PERSISTENT — it reads the same between turns as during one — and it says
+     the fact in WORDS as well as colour, because colour alone is unreadable at
+     a glance and useless to anyone who can't separate blue from violet.
+
+     Accent for local, violet for remote: the same "this is the other thing"
+     role violet already plays on the queue. Deliberately NOT --warn. Running on
+     Claude is a choice, not a fault, and an amber bar every time he uses it
+     would train him to ignore amber by the time usage actually runs out.
+
+     Placed in the LEFT COLUMN below the queue (x 64–494, y 884–~980), the last
+     free band on this screen: the gauge panel ends at 716, the queue occupies
+     756 to at most ~871, and the ticker starts at 1004. Nothing existing moves.
+
+     display:none until something reports, so a HUD nobody has told looks
+     exactly like it did before this existed rather than asserting a brain it
+     does not actually know. */
+  #brainBar{
+    position:absolute; left:64px; top:884px; width:430px; z-index:16;
+    border:1px solid var(--line);
+    border-left:3px solid var(--accent-dim);
+    background:linear-gradient(90deg, rgba(69,169,232,0.07), rgba(12,10,16,0.62));
+    padding:10px 16px 12px;
+    display:none;
+    transition:opacity .4s, border-color .5s;
+  }
+  #brainBar.on{ display:block; }
+  /* The socket dropped. The brain is CONFIGURATION, not a momentary claim like
+     THINKING or a running tool — it does not stop being true because the server
+     restarted — so it dims rather than blanking and taking the privacy
+     indicator with it. */
+  #brainBar.stale{ opacity:0.4; }
+  #brainBar.remote{
+    border-left-color:var(--violet);
+    background:linear-gradient(90deg, rgba(123,111,160,0.15), rgba(12,10,16,0.62));
+  }
+  /* Out of usage takes over the whole band; approaching only marks the edge. */
+  #brainBar.lvl-out{
+    border-color:rgba(217,138,43,0.5); border-left-color:var(--warn);
+    background:linear-gradient(90deg, rgba(217,138,43,0.14), rgba(12,10,16,0.62));
+  }
+  #brainBar.lvl-warn{ border-left-color:var(--warn); }
+
+  .bb-top{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .bb-id{ display:flex; align-items:baseline; gap:10px; min-width:0; }
+  .bb-lab{
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+    font-size:10px; letter-spacing:0.26em; text-transform:uppercase;
+    color:var(--ink-dim); flex:0 0 auto;
+  }
+  .bb-name{
+    font-family: Inter,"Helvetica Neue",system-ui,sans-serif;
+    font-size:24px; font-weight:300; line-height:1; letter-spacing:0.1em;
+    text-transform:uppercase; color:var(--accent); white-space:nowrap;
+  }
+  #brainBar.remote .bb-name{ color:var(--violet); }
+  .bb-ustat{
+    font-family: Inter,"Helvetica Neue",system-ui,sans-serif;
+    font-size:18px; font-weight:300; line-height:1; letter-spacing:0.06em;
+    text-transform:uppercase; color:var(--ok); white-space:nowrap;
+  }
+  /* An UNRECOGNISED status is printed verbatim in the neutral colour. Only
+     "allowed" has ever been observed, so anything else is a guess, and the one
+     failure that must not happen is a new word for "you are out" rendering in
+     the same green as "fine". */
+  .bb-use.lvl-unknown .bb-ustat{ color:var(--ink-dim); font-size:13px; }
+  /* "No call yet" — the window is unknown because nothing has been spent to
+     find out. Neutral and quiet: not a warning, not good news, simply the
+     absence of a measurement. */
+  .bb-use.lvl-none .bb-ustat{ color:var(--ink-dim); font-size:13px; }
+  .bb-use.lvl-warn .bb-ustat{ color:var(--warn); }
+  .bb-use.lvl-out  .bb-ustat{ color:var(--warn); animation:blink 1.4s steps(1) infinite; }
+  .bb-use{ display:none; text-align:right; flex:0 0 auto; }
+  .bb-use.on{ display:block; }
+  .bb-ulab{
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+    font-size:9px; letter-spacing:0.26em; text-transform:uppercase;
+    color:var(--ink-dim); margin-bottom:5px;
+  }
+  /* The sentence that actually answers the question. "CLOUD · SPEECH LEAVES
+     THIS MACHINE" is the whole reason this band exists. */
+  .bb-foot{
+    margin-top:9px; display:flex; align-items:baseline;
+    justify-content:space-between; gap:12px;
+  }
+  .bb-sub{
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+    font-size:10px; letter-spacing:0.2em; text-transform:uppercase;
+    color:var(--ink-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  #brainBar.remote .bb-sub{ color:var(--violet); }
+  /* The percentage of the window spent, when the CLI reports one. With the
+     status word, not on its own line: "NEARLY OUT 94%" is one fact said twice. */
+  .bb-upct{
+    margin-left:9px; color:var(--ink); font-variant-numeric:tabular-nums;
+    letter-spacing:0.02em;
+  }
+  .bb-upct:empty{ display:none; }
+  /* Hidden unless a real fraction arrived — an empty meter would say "you have
+     used none of it" at the moment nobody knows. */
+  .bb-umeter{
+    display:none; margin-top:7px; margin-left:auto; width:130px; height:4px;
+    border-radius:2px; background:rgba(255,255,255,0.07); overflow:hidden;
+  }
+  .bb-umeter.on{ display:block; }
+  .bb-umeter > i{
+    display:block; height:100%; width:0; border-radius:2px;
+    background:var(--ok); transition:width 1.2s cubic-bezier(.22,.61,.36,1);
+  }
+  .bb-use.lvl-warn .bb-umeter > i,
+  .bb-use.lvl-out  .bb-umeter > i{ background:var(--warn); }
+  .bb-use.lvl-unknown .bb-umeter > i{ background:var(--ink-dim); }
+  .bb-ureset{
+    margin-top:6px;
+    font-family: ui-monospace,"JetBrains Mono",monospace;
+    font-size:10px; letter-spacing:0.16em; text-transform:uppercase;
+    color:var(--ink-dim); font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+  }
+  .bb-ureset:empty{ display:none; }
+
+  /* ----------------- DETAIL PANEL (ported from the vertical HUD 2026-08-20) --
+     The written half of an answer. Bastion speaks a sentence or two and the
+     supporting detail lands here instead of costing seconds of TTS
+     (config.HUD_VOICE_SPLIT). Hidden entirely when there is nothing to show, so
+     between turns this screen is byte-for-byte what it was before.
+
+     WHERE: the centre band, over the reactor. That is the only place on a
+     1920x1080 layout with enough width for large type, and the reactor is
+     ornament while this is the answer — when there IS an answer, it wins. Both
+     side columns stay untouched, so nothing that is always-on is ever covered.
+     Sits above the reactor (z 12) and the panels (15/16) at z 17, on a
+     near-opaque ground so the reactor's glow cannot bleed through the text.
+
+     TYPE: sized for the 32" TCL across the room, not the ASUS at desk distance.
+     The floor is 30px rather than the vertical build's 24px — at ~70 px/inch a
+     30px line subtends roughly 15 arcmin at eight feet, which is about where
+     body text stops being comfortable. Below that it pages instead of
+     shrinking: "some of it, legible" beats "all of it, unreadable". */
+  #detailPanel{
+    position:absolute; left:520px; right:520px; top:104px; z-index:17;
+    /* Content-sized up to a ceiling. A four-line answer in a fixed 640px box
+       reads as something having failed to load. The ceiling stops 32px short of
+       the turn stage at y=756. */
+    height:auto; max-height:620px;
+    border:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(23,19,30,0.965), rgba(12,10,16,0.945));
+    backdrop-filter: blur(4px);
+    display:none;
+    flex-direction:column;
+    padding:0;
+  }
+  #detailPanel.on{ display:flex; animation:dtlIn .45s ease both; }
+  @keyframes dtlIn{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+  #detailPanel::before, #detailPanel::after{
+    content:""; position:absolute; width:14px; height:14px; pointer-events:none;
+    border-color:var(--accent-dim); border-style:solid; border-width:0;
+  }
+  #detailPanel::before{ top:-1px; left:-1px; border-top-width:1px; border-left-width:1px; }
+  #detailPanel::after{ bottom:-1px; right:-1px; border-bottom-width:1px; border-right-width:1px; }
+  .dtl-h{
+    flex:0 0 auto;
+    font-size:10.5px; color:var(--accent); letter-spacing:0.34em;
+    padding:11px 22px; border-bottom:1px solid var(--line-soft);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .dtl-h .dtitle{ color:var(--ink); }
+  .dtl-h .dtick{ color:var(--ink-dim); letter-spacing:0.26em; }
+  #detailBody{
+    flex:1 1 auto; min-height:0; overflow:hidden;
+    margin:16px 22px 0;
+    font-family:"Helvetica Neue","Inter","Segoe UI",system-ui,sans-serif;
+    font-size:36px; line-height:1.45; letter-spacing:0.005em;
+    color:#E4EDF7;
+    white-space:pre-wrap; word-break:break-word;
+    scroll-behavior:smooth;
+  }
+  #detailBody .dtrunc{
+    display:block; margin-top:14px;
+    font-family:ui-monospace,"JetBrains Mono",monospace;
+    font-size:13px; letter-spacing:0.22em; text-transform:uppercase;
+    color:var(--warn);
+  }
+  .dtl-foot{
+    flex:0 0 auto; margin:14px 22px 0; padding:11px 0 13px;
+    border-top:1px solid var(--line-soft);
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:11px; letter-spacing:0.26em; color:var(--ink-dim);
+    text-transform:uppercase;
+  }
+  /* visibility, not display: the foot keeps its height either way, so the body
+     does not reflow between a one-page and a multi-page answer. */
+  .dtl-foot.hidden{ visibility:hidden; }
+  .dtl-dots{ display:flex; gap:7px; }
+  .dtl-dots span{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--accent-dim); opacity:0.45;
+    transition:opacity .3s, box-shadow .3s;
+  }
+  .dtl-dots span.on{ opacity:1; background:var(--accent); box-shadow:0 0 6px rgba(69,169,232,0.6); }
+
+  /* ----------------- weather ----------------- */
+  #wxPanel{ right:64px; top:104px; width:430px; height:228px; }
+  #wxTop{ display:flex; align-items:flex-start; justify-content:space-between; }
+  #wxTemp{ font-size:78px; line-height:0.9; color:var(--ink); }
+  #wxTemp .deg{ font-size:34px; color:var(--accent); vertical-align:top; }
+  #wxCond{ font-size:13px; color:var(--accent); letter-spacing:0.28em; margin-top:6px; }
+  #wxLoc{ font-size:11px; color:var(--ink-dim); letter-spacing:0.3em; text-align:right; }
+  #wxMeta{ display:flex; gap:0; margin-top:18px; border-top:1px solid var(--line-soft); }
+  .wxCell{ flex:1; padding:12px 4px 2px; text-align:center; border-right:1px solid var(--line-soft); }
+  .wxCell:last-child{ border-right:0; }
+  .wxCell .v{ font-size:22px; color:var(--ink); }
+  .wxCell .k{ font-size:9px; color:var(--ink-dim); letter-spacing:0.26em; margin-top:5px; }
+
+  /* ----------------- diagnostics ----------------- */
+  #diagPanel{ right:64px; top:356px; width:430px; height:228px; }
+  .diagRow{ display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line-soft); }
+  .diagRow:last-child{ border-bottom:0; }
+  .diagRow .k{ font-size:10px; color:var(--ink-dim); letter-spacing:0.26em; }
+  .diagRow .v{ font-size:11px; color:var(--ink); letter-spacing:0.2em; }
+  .diagRow .v.good{ color:var(--ok); }
+  #diagStatus{ display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ok); letter-spacing:0.3em; padding:4px 0 12px; }
+  #diagStatus .dot{ background:var(--ok); box-shadow:0 0 10px var(--ok); }
+
+  /* ----------------- conversation log -----------------
+     Moved out of the centre (was bottom:96px, 660px wide, centred) into the
+     right column under DIAGNOSTICS. Where it was, it sat ON TOP of the state
+     readout — same x range, higher z-index, near-opaque background — so the
+     one thing this HUD was supposed to show about Bastion was painted over by
+     a panel. That is most of why the horizontal "showed nothing useful".
+     Content-sized, not a fixed 236px box: with one line in it a fixed panel
+     renders as a large empty bordered rectangle, which reads as something
+     having failed to load. It grows downward as the conversation fills. */
+  #feedPanel{ right:64px; top:608px; width:430px; height:auto; max-height:382px; }
+  #feed{ display:flex; flex-direction:column; justify-content:flex-end; gap:9px; max-height:316px; overflow:hidden; }
+  .msg{ font-size:12.5px; line-height:1.5; letter-spacing:0.04em; transition:opacity .6s; }
+  .msg .who{ letter-spacing:0.2em; font-size:11px; }
+  .msg.user .who{ color:var(--violet); }
+  .msg.assistant .who{ color:var(--accent); }
+  .msg .txt{ color:var(--ink); }
+  .msg.user .txt{ color:#cfc7e0; }
+
+  /* ----------------- telemetry ticker ----------------- */
+  #ticker{
+    position:absolute; left:64px; right:64px; bottom:46px; z-index:18;
+    height:30px; border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft);
+    overflow:hidden; display:flex; align-items:center;
+  }
+  #tickerTrack{
+    white-space:nowrap; font-size:10.5px; color:var(--ink-dim); letter-spacing:0.3em;
+    will-change:transform; animation:scroll 48s linear infinite;
+  }
+  #tickerTrack span{ color:var(--accent-dim); }
+  @keyframes scroll{ from{transform:translateX(0);} to{transform:translateX(-50%);} }
+
+  /* corner ring accents */
+  .ringAccent{ position:absolute; z-index:11; }
+  /* Both accents moved up beside the reactor: at bottom:140px the lower one
+     landed inside the new turn stage. */
+  #ringTL{ left:522px; top:150px; }
+  #ringBR{ right:522px; top:150px; }
+
+  @media (prefers-reduced-motion: reduce){
+    #tickerTrack{ animation:none; }
+    .dot{ animation:none; }
+    /* The stage still changes — it is the live state — but it snaps instead of
+       easing, and the elapsed counter ticks in whole seconds (TICK_MS below). */
+    #turnStage, #verb, #elapsed, .rs-dot, .rs-lab, #reasoning,
+    .thought, #queueBar, #toolLine, #brainBar{ transition:none; }
+    /* Out of usage still reads EXHAUSTED in amber on an amber band — it loses
+       the blink, not the message. */
+    .bb-use.lvl-out .bb-ustat{ animation:none; }
+    .stage-top .mini, #reasoning .rcaret, .thought .tpip,
+    #toolLine .tl-pip{ animation:none; }
+    /* Paging still happens — it is how the rest of the text is reached, not
+       decoration. Only the movement is dropped. */
+    #detailPanel.on{ animation:none; }
+    #centerWrap{ transition:none; }
+    #detailBody{ scroll-behavior:auto; }
+    .dtl-dots span{ transition:none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- backgrounds -->
+  <canvas id="hexbg" width="1920" height="1080"></canvas>
+
+  <!-- frame + corners -->
+  <div id="frame">
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+  </div>
+
+  <!-- header -->
+  <div id="header">
+    <div class="wordmark">Bastion <span class="slash">//</span> <span class="loc">LOCAL</span></div>
+    <div class="conn">
+      <span id="connText">LINK ESTABLISHED · 127.0.0.1</span>
+      <span class="dot" id="connDot"></span>
+    </div>
+  </div>
+
+  <!-- clock -->
+  <div class="panel" id="clockPanel">
+    <div class="panel-h">SYSTEM TIME <span class="tag">UTC-LOCAL</span></div>
+    <div class="panel-b">
+      <div id="clock" class="numer">00<span class="colon">:</span>00<span class="colon">:</span>00</div>
+      <div id="dateLine" class="mono">— — —</div>
+    </div>
+  </div>
+
+  <!-- gauges -->
+  <div class="panel" id="gaugePanel">
+    <div class="panel-h">CORE TELEMETRY <span class="tag">REALTIME</span></div>
+    <div class="panel-b">
+      <div class="gaugeGrid">
+        <div class="gauge">
+          <canvas data-gauge="cpu" width="150" height="150"></canvas>
+          <div class="gv numer"><span id="cpuVal">0</span><small>%</small></div>
+          <div class="gl">CPU</div>
+          <div class="badge">LOAD <b id="cpuLoad">—</b></div>
+        </div>
+        <div class="gauge">
+          <canvas data-gauge="gpu" width="150" height="150"></canvas>
+          <div class="gv numer"><span id="gpuVal">0</span><small>%</small></div>
+          <div class="gl">GPU</div>
+          <div class="badge"><b id="gpuTemp">—°C</b></div>
+        </div>
+        <div class="gauge">
+          <canvas data-gauge="ram" width="150" height="150"></canvas>
+          <div class="gv numer"><span id="ramVal">0</span><small>%</small></div>
+          <div class="gl">RAM</div>
+          <div class="badge" id="ramBadge"><b>—</b> / — GB</div>
+        </div>
+        <div class="gauge">
+          <canvas data-gauge="disk" width="150" height="150"></canvas>
+          <div class="gv numer"><span id="diskVal">0</span><small>%</small></div>
+          <div class="gl">DISK</div>
+          <div class="badge">SSD <b id="diskFree">—</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- center reactor -->
+  <div id="centerWrap">
+    <canvas id="reactor" width="620" height="620"></canvas>
+  </div>
+
+  <!-- THE TURN STAGE — live turn state (see the CSS block above) -->
+  <section id="turnStage">
+    <div class="stage-top">
+      <span class="k">Turn</span>
+      <span class="live"><span class="mini"></span><span id="stageTick">Local</span></span>
+    </div>
+    <div class="stage-status">
+      <div id="verb">ESTABLISHING LINK</div>
+      <div id="elapsed"></div>
+      <div class="thought" id="thought">
+        <span class="tpip"></span><span id="thoughtVal">0</span><span class="tunit">thought chars</span>
+      </div>
+    </div>
+    <div id="heardLine" class="hint"></div>
+    <!-- Which tool is running — the name only, never the arguments. -->
+    <div id="toolLine">
+      <span class="tl-pip"></span><span class="tl-lab">Tool</span><span
+        class="tl-name" id="toolName"></span><span class="tl-el" id="toolElapsed"></span>
+    </div>
+    <div id="reasoning"></div>
+    <div id="rail">
+      <div class="rail-step"><span class="rs-dot"></span><span class="rs-lab">Heard</span></div>
+      <div class="rail-step"><span class="rs-dot"></span><span class="rs-lab">Thinking</span></div>
+      <div class="rail-step"><span class="rs-dot"></span><span class="rs-lab">Answering</span></div>
+      <div class="rail-step"><span class="rs-dot"></span><span class="rs-lab">Speaking</span></div>
+    </div>
+  </section>
+
+  <!-- THE QUEUE — a turn heard and waiting. Beside the running turn, never
+       instead of it: both are true at once. -->
+  <section id="queueBar">
+    <div class="q-top">
+      <span class="q-lab" id="qLabel">Queued &middot; heard, waiting</span>
+      <span class="q-wait" id="qWait"></span>
+    </div>
+    <div class="q-text" id="qText"></div>
+  </section>
+
+  <!-- WHICH BRAIN IS ANSWERING, AND HOW MUCH OF IT IS LEFT.
+       Persistent, not transient: he should never have to guess whether what he
+       just said stayed on this machine. -->
+  <section id="brainBar">
+    <div class="bb-top">
+      <div class="bb-id">
+        <span class="bb-lab">Brain</span>
+        <span class="bb-name" id="brainName">&mdash;</span>
+      </div>
+      <div class="bb-use" id="brainUse">
+        <div class="bb-ulab">Usage <span id="usageWin"></span></div>
+        <div class="bb-ustat"><span id="usageStat">&mdash;</span><span class="bb-upct" id="usagePct"></span></div>
+        <div class="bb-umeter" id="usageMeter"><i id="usageBar"></i></div>
+        <div class="bb-ureset" id="usageReset"></div>
+      </div>
+    </div>
+    <div class="bb-foot">
+      <span class="bb-sub" id="brainSub"></span>
+    </div>
+  </section>
+
+  <!-- DETAIL PANEL — hidden until a "detail" message arrives -->
+  <section id="detailPanel">
+    <div class="dtl-h">
+      <span>DETAIL <span class="dtitle" id="detailTitle">&mdash;</span></span>
+      <span class="dtick" id="detailAge">JUST NOW</span>
+    </div>
+    <div id="detailBody"></div>
+    <div class="dtl-foot hidden" id="detailFoot">
+      <span id="detailPage">PAGE 1 / 1</span>
+      <span class="dtl-dots" id="detailDots"></span>
+    </div>
+  </section>
+
+  <!-- ring accents -->
+  <canvas class="ringAccent" id="ringTL" width="90" height="90"></canvas>
+  <canvas class="ringAccent" id="ringBR" width="90" height="90"></canvas>
+
+  <!-- weather -->
+  <div class="panel" id="wxPanel">
+    <div class="panel-h">ATMOSPHERIC <span class="tag">EXT</span></div>
+    <div class="panel-b">
+      <div id="wxTop">
+        <div>
+          <div id="wxTemp" class="numer"><span id="wxTempF">--</span><span class="deg">°F</span></div>
+          <div id="wxCond">— — —</div>
+        </div>
+        <div id="wxLoc" class="mono">— — —</div>
+      </div>
+      <div id="wxMeta">
+        <div class="wxCell"><div class="v numer"><span id="wxHum">--</span><small style="font-size:13px;color:var(--ink-dim)">%</small></div><div class="k">HUMIDITY</div></div>
+        <div class="wxCell"><div class="v numer"><span id="wxWind">--</span></div><div class="k">WIND MPH</div></div>
+        <div class="wxCell"><div class="v numer"><span id="wxTempC">--</span><small style="font-size:13px;color:var(--ink-dim)">°C</small></div><div class="k">CELSIUS</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- diagnostics -->
+  <div class="panel" id="diagPanel">
+    <div class="panel-h">DIAGNOSTICS <span class="tag">SELF-CHECK</span></div>
+    <div class="panel-b">
+      <div id="diagStatus"><span class="dot"></span><span id="diagText">ALL SYSTEMS NOMINAL</span></div>
+      <div class="diagRow"><span class="k">MODEL</span><span class="v" id="diagModel">QWEN3:8B · OLLAMA + MOONDREAM</span></div>
+      <div class="diagRow"><span class="k">TOOLS</span><span class="v good">24 TOOLS ONLINE</span></div>
+      <div class="diagRow"><span class="k">HOTKEY</span><span class="v">CTRL+ALT+J</span></div>
+      <div class="diagRow"><span class="k">MIC</span><span class="v">BLUE YETI</span></div>
+    </div>
+  </div>
+
+  <!-- conversation log -->
+  <div class="panel feed-panel" id="feedPanel">
+    <div class="panel-h">CONVERSATION LOG <span class="tag">LAST 5</span></div>
+    <div class="panel-b">
+      <div id="feed"></div>
+    </div>
+  </div>
+
+  <!-- telemetry ticker -->
+  <div id="ticker"><div id="tickerTrack"></div></div>
+
+  <!-- overlays -->
+  <canvas id="grain" class="overlay" width="320" height="180"></canvas>
+  <div id="scanlines" class="overlay"></div>
+  <div id="vignette" class="overlay"></div>
+
+</div>
+
+<script>
+/* ============================================================
+   Bastion HUD — runtime
+   ============================================================ */
+"use strict";
+const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const TAU = Math.PI * 2;
+
+/* ---- helpers ---- */
+const $ = (id) => document.getElementById(id);
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+/* Was USED by the reasoning ticker below and never DEFINED — every tick threw
+   a ReferenceError, so the reasoning strip on this screen has never once
+   rendered. Text from the socket goes through innerHTML, so it must be
+   escaped, not merely defined. */
+const escapeHtml = (s) => String(s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+/* ============================================================
+   SHARED STATE  (everything dynamic lives here)
+   ============================================================ */
+const STATE = {
+  assistant: "link",                  // link | idle | listening | transcribing | thinking | answering | speaking
+  // current + target values for smooth gauge animation
+  cpu:{cur:0,tgt:0}, gpu:{cur:0,tgt:0}, ram:{cur:0,tgt:0}, disk:{cur:0,tgt:0},
+  gpu_temp:0, ram_used:0, ram_total:0,
+  energy:0.12,                        // reactor intensity 0..1
+};
+
+/* Label + reactor energy per assistant state. Six values come from the server
+   (HUD_STATES in hud_server.py); "link" is local to the wallpaper and means the
+   socket is down. */
+const STATE_STYLE = {
+  link:         { label:"ESTABLISHING LINK", energy:0.05 },
+  idle:         { label:"READY",             energy:0.12 },
+  listening:    { label:"LISTENING",         energy:0.85 },
+  transcribing: { label:"TRANSCRIBING",      energy:0.45 },
+  thinking:     { label:"THINKING",          energy:0.40 },
+  answering:    { label:"ANSWERING",         energy:0.60 },
+  speaking:     { label:"SPEAKING",          energy:0.95 },
+};
+/* Position on the four-step rail. Anything not listed leaves the rail dark,
+   which is the honest answer for a state this HUD has not been taught yet. */
+const STATE_STEP = { transcribing:0, thinking:1, answering:2, speaking:3 };
+/* Mid-turn states: he is waiting on Bastion, so the stage lights up. */
+const STATE_BUSY = { listening:1, transcribing:1, thinking:1, answering:1, speaking:1 };
+const IDLE_HINT  = "Say “Bastion”  ·  or Ctrl+Alt+J";
+
+/* ============================================================
+   THE TURN STAGE  —  driven entirely by
+   {"type":"state","value":...,"since":<epoch seconds>}
+   "since" is the moment the state was ENTERED, not the moment we heard about
+   it, so a wallpaper that reloads mid-think shows the true wait instead of
+   restarting the counter at zero. The reload watcher refreshes this page on
+   every HTML edit, so that happens often.
+   ============================================================ */
+var stateSince = 0;                 // ms epoch of the current state, 0 = not in a turn
+const TICK_MS = REDUCED ? 1000 : 100;
+
+function pad2(n){ return n < 10 ? "0"+n : ""+n; }
+
+function railTo(step){
+  const steps = $("rail").children;
+  for(let i=0;i<steps.length;i++){
+    steps[i].className = "rail-step" +
+      (step < 0 ? "" : (i < step ? " done" : (i === step ? " now" : "")));
+  }
+}
+
+function setHeard(text){
+  const el = $("heardLine");
+  text = String(text || "").trim();
+  if(!text){
+    el.className = "hint";
+    el.textContent = IDLE_HINT;
+  } else {
+    el.className = "";
+    el.innerHTML = '<span class="hw">YOU &rsaquo;</span> ' + escapeHtml(text);
+  }
+}
+
+function fmtElapsed(ms){
+  const s = ms / 1000;
+  if(s >= 60){ const m = Math.floor(s/60); return m + ":" + pad2(Math.floor(s - m*60)); }
+  return REDUCED ? (Math.floor(s) + "s") : (s.toFixed(1) + "s");
+}
+function tickElapsed(){
+  const el = $("elapsed");
+  if(!el) return;
+  if(!stateSince){ el.textContent = ""; el.className = ""; return; }
+  let ms = Date.now() - stateSince;
+  if(ms < 0) ms = 0;
+  el.textContent = fmtElapsed(ms);
+  // Amber up to ten seconds, warm orange past it. Not red: a long think is
+  // slow, not broken, and crying wolf on the normal case is worse than silence.
+  el.className = "on" + (ms > 10000 ? " slow" : "");
+}
+setInterval(tickElapsed, TICK_MS);
+
+/* ---- the thought meter ----
+   The elapsed counter says how LONG; this says how MUCH. Only the second one
+   separates "working" from "stuck": a hung process has a rising clock too.
+
+   on_thinking() in bastion.py sends the RUNNING TOTAL for the current round and
+   a tool call restarts it at zero, so a shrinking length is a round boundary,
+   not lost work — the finished round folds into a base and the number only ever
+   climbs within one turn. A count that jumped backwards would read as a fault,
+   which is precisely the impression this exists to prevent. */
+const THOUGHT_STALE_MS = 6000;      // no growth for this long -> pip goes hollow
+var thoughtBase = 0, thoughtRound = 0, thoughtPeak = -1, thoughtGrewAt = 0;
+
+function thoughtReset(){
+  thoughtBase = 0; thoughtRound = 0; thoughtPeak = -1; thoughtGrewAt = 0;
+  const el = $("thought");
+  if(el) el.className = "thought";
+}
+function thoughtFeed(text){
+  const len = String(text || "").length;
+  if(!len) return;                                       // clearing is thoughtReset()'s job
+  if(len < thoughtRound) thoughtBase += thoughtRound;     // a new round began
+  thoughtRound = len;
+  paintThought();
+}
+function paintThought(){
+  const el = $("thought");
+  if(!el) return;
+  const n = thoughtBase + thoughtRound;
+  if(STATE.assistant !== "thinking" || n <= 0){ el.className = "thought"; return; }
+  if(n > thoughtPeak){ thoughtPeak = n; thoughtGrewAt = Date.now(); }
+  $("thoughtVal").textContent = n.toLocaleString();
+  el.className = "thought on" +
+    ((Date.now() - thoughtGrewAt) > THOUGHT_STALE_MS ? " stale" : "");
+}
+setInterval(paintThought, 500);
+
+/* ---- the queue: a turn heard and waiting ----
+   {"type":"queue","waiting":N,"text":"...","since":<epoch s>}. N === 0 takes
+   the band down. "since" is when the OLDEST waiter began waiting, the same
+   convention as state.since, so this survives a reload as well. */
+var queueSince = 0;
+function applyQueue(waiting, text, since){
+  const el = $("queueBar");
+  if(!el) return;
+  waiting = Math.max(0, parseInt(waiting, 10) || 0);
+  if(!waiting){
+    queueSince = 0;
+    el.className = "";
+    $("qText").innerHTML = "";
+    $("qWait").textContent = "";
+    return;
+  }
+  queueSince = (typeof since === "number" && since > 0) ? since * 1000 : Date.now();
+  $("qLabel").textContent = (waiting > 1 ? "Queued ×" + waiting : "Queued") +
+                            " · heard, waiting";
+  const t = String(text || "").trim();
+  $("qText").innerHTML = t ? ('<span class="qw">YOU &rsaquo;</span> ' + escapeHtml(t)) : "";
+  el.className = "on";
+  tickQueue();
+}
+function tickQueue(){
+  const el = $("qWait");
+  if(!el) return;
+  if(!queueSince){ el.textContent = ""; return; }
+  let ms = Date.now() - queueSince;
+  if(ms < 0) ms = 0;
+  el.textContent = fmtElapsed(ms);
+}
+setInterval(tickQueue, TICK_MS);
+
+/* ---- the running tool ----
+   {"type":"tool","name":"look_at_screen","active":true,"since":<epoch s>}
+   Empty name clears the line, same convention as reasoning and detail.
+   active:false keeps the name up, dimmed, with its elapsed FROZEN at how long
+   the tool took — a number still climbing beside a finished tool would lie. */
+var toolSince = 0, toolRunning = false;
+function applyTool(name, active, since){
+  const el = $("toolLine");
+  if(!el) return;
+  const n = String(name || "").trim();
+  if(!n){
+    toolSince = 0; toolRunning = false;
+    el.className = "";
+    $("toolName").textContent = "";
+    $("toolElapsed").textContent = "";
+    return;
+  }
+  toolSince = (typeof since === "number" && since > 0) ? since * 1000 : Date.now();
+  toolRunning = !!active;
+  $("toolName").textContent = n;
+  el.className = "on" + (toolRunning ? "" : " done");
+  tickTool(true);
+}
+function tickTool(force){
+  const el = $("toolElapsed");
+  if(!el) return;
+  if(!toolSince){ el.textContent = ""; return; }
+  if(!toolRunning && !force) return;
+  let ms = Date.now() - toolSince;
+  if(ms < 0) ms = 0;
+  el.textContent = fmtElapsed(ms);
+}
+// Wrapped so nothing can ever be passed as `force`.
+setInterval(function(){ tickTool(); }, TICK_MS);
+
+/* ---- which brain, and how much of it is left ----
+   {"type":"brain","brain":"claude","label":"claude-opus-5","remote":true,
+    "since":<epoch s>,
+    "usage":{"level":"warn","status":"allowed_warning","window":"five_hour",
+             "resets_at":<epoch s>,"overage":"rejected"}}
+   usage may be null. Everything here is set with textContent — brain, label and
+   status all originate outside this file. */
+var brainState = null;
+/* Only the LEVEL is trusted to be one of ok/warn/out/unknown; the wording is
+   ours. An unrecognised status is shown verbatim, so a new value from the CLI
+   reads as itself rather than as "fine". */
+const USAGE_WORD = { ok:"OK", warn:"Nearly out", out:"Exhausted" };
+
+/* What the wordmark and the DIAGNOSTICS model row say with NO brain reported —
+   i.e. local, which is now the silent default. Read out of the markup at load
+   rather than hardcoded a second time here, so there is still exactly one place
+   that spells out what this machine runs. */
+const LOCAL_TEXT = {
+  wm:  (document.querySelector(".wordmark .loc") || {}).textContent || "LOCAL",
+  mod: ($("diagModel") || {}).textContent || "QWEN3:8B · OLLAMA + MOONDREAM"
+};
+
+function fmtUntil(ms){
+  if(ms <= 0) return "reset due";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  if(h > 0) return "resets in " + h + "h " + pad2(m) + "m";
+  if(m > 0) return "resets in " + m + "m";
+  return "resets in " + (s % 60) + "s";
+}
+function brainTick(){
+  if(!brainState) return "Local";
+  return String(brainState.brain || "").toUpperCase() || "Local";
+}
+
+function applyBrain(msg){
+  const el = $("brainBar");
+  if(!el) return;
+  brainState = (msg && msg.brain) ? msg : null;
+  const use = $("brainUse");
+
+  if(!brainState){
+    // Back on the local model: the band goes away entirely and the driven lines
+    // revert to what the markup shipped with, so a local HUD is byte-for-byte
+    // what it was before any of this existed.
+    el.className = "";
+    if(use) use.className = "bb-use";
+    $("usageReset").textContent = "";
+    const wm0 = document.querySelector(".wordmark .loc");
+    if(wm0) wm0.textContent = LOCAL_TEXT.wm;
+    $("diagModel").textContent = LOCAL_TEXT.mod;
+    $("stageTick").textContent = STATE.assistant === "link" ? "Offline" : "Local";
+    return;
+  }
+
+  const name = String(brainState.brain).toUpperCase();
+  const remote = !!brainState.remote;
+  const model = String(brainState.label || "");
+
+  $("brainName").textContent = name;
+  // The words carry the fact; the colour only reinforces it.
+  $("brainSub").textContent = remote ? "Cloud · speech leaves this machine"
+                                     : "On-device · nothing leaves this machine";
+
+  const u = brainState.usage || null;
+  const lvl = u ? String(u.level || "unknown") : "";
+  if(u){
+    $("usageWin").textContent = String(u.window || "").replace(/_/g, " ");
+    $("usageStat").textContent = USAGE_WORD[lvl] || String(u.status || "unknown");
+    if(use) use.className = "bb-use on lvl-" + (USAGE_WORD[lvl] ? lvl : "unknown");
+    // THE REAL PERCENTAGE. Only `allowed_warning` events carry `utilization`,
+    // so most of the time there is none — and `null` means NOT REPORTED while
+    // `0` means NOTHING USED. Opposite facts: a `typeof` check, never a
+    // falsy one, or a genuine 0% would vanish and 94% would look the same as
+    // "no idea".
+    const pct = (u && typeof u.percent === "number") ? u.percent : null;
+    $("usagePct").textContent = pct === null ? "" : Math.round(pct) + "%";
+    const mtr = $("usageMeter"), bar = $("usageBar");
+    if(mtr) mtr.className = "bb-umeter" + (pct === null ? "" : " on");
+    if(bar) bar.style.width = (pct === null ? 0 : Math.max(0, Math.min(100, pct))) + "%";
+  } else if(use){
+    // NO usage on a remote brain means the window has not been reported yet,
+    // NOT that it is empty. The CLI only reports it as a side effect of a
+    // request, so a fresh process cannot know — the normal state first thing in
+    // the morning. "0" or an empty bar here would read as "out of usage" when
+    // it means "we have not spent a call to find out".
+    $("usageWin").textContent = "";
+    $("usageStat").textContent = "No call yet";
+    $("usagePct").textContent = "";
+    $("usageReset").textContent = "";
+    if($("usageMeter")) $("usageMeter").className = "bb-umeter";
+    use.className = "bb-use on lvl-none";
+  }
+
+  el.className = "on" + (remote ? " remote" : "") +
+                 (u && (lvl === "warn" || lvl === "out") ? " lvl-" + lvl : "");
+
+  // The three places that used to be hardcoded "LOCAL" / "QWEN3:8B" and would
+  // otherwise keep saying so while Claude answered.
+  const wm = document.querySelector(".wordmark .loc");
+  if(wm) wm.textContent = name;
+  $("diagModel").textContent =
+    (model ? model.toUpperCase() : name) + (remote ? " · CLAUDE CLI" : " · OLLAMA + MOONDREAM");
+  $("stageTick").textContent = STATE.assistant === "link" ? "Offline" : brainTick();
+  tickUsage();
+}
+
+/* The CLI reports a status and a reset TIME — it does not report a fraction
+   used, so there is no meter here and inventing one would be worse than the
+   countdown. `resets_at` in the past means the window has rolled over and no
+   new event has arrived yet: the countdown says "reset due" rather than going
+   on asserting an exhausted window that has probably ended. */
+function tickUsage(){
+  const el = $("usageReset");
+  if(!el) return;
+  const u = brainState && brainState.usage;
+  if(!u || !u.resets_at){ el.textContent = ""; return; }
+  el.textContent = fmtUntil(u.resets_at * 1000 - Date.now());
+}
+setInterval(tickUsage, 1000);
+
+function applyState(value, since){
+  value = String(value || "idle").toLowerCase();
+  const s = STATE_STYLE[value] || STATE_STYLE.idle;
+  const busy = !!STATE_BUSY[value];
+  STATE.assistant = value;
+  STATE.energyTarget = s.energy;
+  $("turnStage").className = busy ? "busy" : "";
+  $("verb").textContent = s.label || value.toUpperCase();
+  // Was hardcoded "Local". It is now whatever brain has reported, because a
+  // stage tick reading LOCAL during a Claude turn is the single wrong thing
+  // this whole feature exists to prevent.
+  $("stageTick").textContent = value === "link" ? "Offline" : brainTick();
+  // The reasoning strip belongs to the thinking phase and nothing else. Left up
+  // during SPEAKING it is both stale and in the way.
+  // Fires on ENTERING a non-thinking state only. voice.py re-enters "thinking"
+  // after every tool round inside one turn, so resetting on entry would zero
+  // the count mid-turn.
+  // The tool line belongs to the tool rounds, which all sit inside "thinking".
+  // The server clears it on the same rule, before it sends the state; this is
+  // the belt, so a dropped clear cannot strand a tool name on the stage.
+  if(value !== "thinking"){ setReasoning(""); thoughtReset(); applyTool(""); }
+  // A new turn starts at "listening", and an idle HUD has no question on it:
+  // both drop the previous one so nothing on the stage is out of date.
+  if(value === "listening" || !busy) setHeard("");
+  stateSince = busy ? (typeof since === "number" ? since * 1000 : Date.now()) : 0;
+  railTo(busy ? (STATE_STEP[value] == null ? -1 : STATE_STEP[value]) : -1);
+  tickElapsed();
+}
+
+/* ============================================================
+   applyData(msg)  —  SINGLE DATA ENTRY POINT
+     ws.onmessage = (e) => applyData(JSON.parse(e.data));
+   Accepted message shapes:
+     { type:"state",   value:"idle"|"listening"|"transcribing"|"thinking"|
+                             "answering"|"speaking", since:<epoch s> }
+     { type:"stats",   cpu, gpu, gpu_temp, ram, ram_used_gb, ram_total_gb, disk }
+     { type:"weather", location, temp_f, temp_c, condition, humidity, wind_kmh }
+     { type:"transcript", role:"user"|"assistant", text }
+     { type:"detail",  text, title, ttl_s, truncated }
+   ============================================================ */
+/* ---------- detail panel (ported from wallpaper/index.html 2026-08-20) -------
+   Long-form written answers. The constraint that shapes it: on the 32" TCL this
+   is read from across a room, so the type cannot shrink far, which means a long
+   reply genuinely does not fit. It pages rather than scrolls — a slow crawl is
+   hard to follow at distance — and it never ends mid-thought without saying so.
+   Largest size that fits wins; below the floor it pages instead of shrinking. */
+const DETAIL_SIZES   = [46, 40, 34, 30];
+const DETAIL_PAGE_MS = 9000;            // dwell per page
+let dPages = 1, dPage = 0, dStep = 0;
+let dPageTimer = null, dTtlTimer = null, dShownAt = 0;
+
+function detailPaint(){
+  const dBody = $("detailBody");
+  // The last page snaps to the true bottom rather than to a whole-line multiple:
+  // overlapping a line with the previous page is fine, losing the final one is not.
+  dBody.scrollTop = (dPage === dPages - 1)
+    ? Math.max(0, dBody.scrollHeight - dBody.clientHeight)
+    : dPage * dStep;
+  $("detailPage").textContent = dPages > 1
+    ? ("PAGE " + (dPage + 1) + " / " + dPages) : "COMPLETE";
+  const dots = $("detailDots").children;
+  for(let i = 0; i < dots.length; i++) dots[i].className = (i === dPage ? "on" : "");
+}
+
+function detailLayout(){
+  const dBody = $("detailBody");
+  dBody.style.maxHeight = "";                       // measure unclamped
+  for(let i = 0; i < DETAIL_SIZES.length; i++){
+    dBody.style.fontSize = DETAIL_SIZES[i] + "px";
+    if(dBody.scrollHeight <= dBody.clientHeight + 1) break;
+  }
+  const lineH = parseFloat(getComputedStyle(dBody).lineHeight) || 44;
+  // Measure the FRACTIONAL height. clientHeight is rounded to whole pixels, and
+  // at a 66.7px line height that rounding is enough to lose a whole line: a
+  // two-line answer measured 133px against a 133.4px pair of lines, floored to
+  // one visible line, and a reply that plainly fitted announced "PAGE 1 / 2".
+  // The epsilon covers the same rounding inside getComputedStyle's line-height.
+  const boxH = dBody.getBoundingClientRect().height || dBody.clientHeight;
+  const visLines = Math.max(1, Math.floor(boxH / lineH + 0.05));
+  // The box is an arbitrary height, so its last visible row was a line of glyphs
+  // sliced in half — which reads as a rendering fault, not as "there is more".
+  // Clamp to a whole number of lines and the page ends cleanly.
+  dBody.style.maxHeight = (visLines * lineH) + "px";
+  dStep = visLines * lineH;
+  // Ask the box, not the arithmetic: dStep rounds down to whole lines, so
+  // scrollHeight/dStep reads as 2 pages for text that plainly fits.
+  dPages = (dBody.scrollHeight <= dBody.clientHeight + 1)
+    ? 1 : Math.max(2, Math.ceil(dBody.scrollHeight / dStep));
+  dPage = 0;
+
+  const dots = $("detailDots");
+  dots.innerHTML = "";
+  if(dPages > 1){
+    for(let j = 0; j < dPages; j++) dots.appendChild(document.createElement("span"));
+  }
+  $("detailFoot").className = "dtl-foot" + (dPages > 1 ? "" : " hidden");
+  detailPaint();
+
+  if(dPageTimer){ clearInterval(dPageTimer); dPageTimer = null; }
+  if(dPages > 1){
+    dPageTimer = setInterval(() => { dPage = (dPage + 1) % dPages; detailPaint(); },
+                             DETAIL_PAGE_MS);
+  }
+}
+
+function clearDetail(){
+  if(dPageTimer){ clearInterval(dPageTimer); dPageTimer = null; }
+  if(dTtlTimer){ clearTimeout(dTtlTimer);    dTtlTimer  = null; }
+  $("detailPanel").classList.remove("on");
+  $("stage").classList.remove("detail-on");
+  $("detailBody").innerHTML = "";
+  dShownAt = 0;
+}
+
+function showDetail(msg){
+  const text = String(msg.text == null ? "" : msg.text);
+  // An empty or whitespace-only text clears the panel — same convention as the
+  // reasoning strip, and it is how the server ends a turn (set_state("thinking")
+  // emits detail with text:"").
+  if(!text.trim()){ clearDetail(); return; }
+  clearDetail();
+  $("detailTitle").textContent = String(msg.title || "DETAIL").toUpperCase();
+  $("detailBody").innerHTML = escapeHtml(text) +
+    (msg.truncated ? '<span class="dtrunc">&mdash; truncated &mdash;</span>' : "");
+  $("detailPanel").classList.add("on");
+  $("stage").classList.add("detail-on");
+  dShownAt = Date.now();
+  detailAge();
+  detailLayout();                                   // needs the panel visible to measure
+  const ttl = Number(msg.ttl_s);
+  if(ttl > 0) dTtlTimer = setTimeout(clearDetail, ttl * 1000);
+}
+
+function detailAge(){
+  if(!dShownAt) return;
+  const mins = Math.floor((Date.now() - dShownAt) / 60000);
+  $("detailAge").textContent = mins < 1 ? "JUST NOW" : (mins + "M AGO");
+}
+setInterval(detailAge, 15000);
+
+function applyData(msg){
+  if(!msg || !msg.type) return;
+  switch(msg.type){
+
+    case "state": {
+      applyState(msg.value, msg.since);
+      break;
+    }
+
+    case "stats": {
+      if(msg.cpu  != null) STATE.cpu.tgt  = clamp(+msg.cpu,0,100);
+      if(msg.gpu  != null) STATE.gpu.tgt  = clamp(+msg.gpu,0,100);
+      if(msg.ram  != null) STATE.ram.tgt  = clamp(+msg.ram,0,100);
+      if(msg.disk != null) STATE.disk.tgt = clamp(+msg.disk,0,100);
+      if(msg.gpu_temp != null){ STATE.gpu_temp = +msg.gpu_temp; $("gpuTemp").textContent = Math.round(+msg.gpu_temp)+"°C"; }
+      if(msg.ram_used_gb != null) STATE.ram_used = +msg.ram_used_gb;
+      if(msg.ram_total_gb != null) STATE.ram_total = +msg.ram_total_gb;
+      if(STATE.ram_total){
+        $("ramBadge").innerHTML = "<b>"+STATE.ram_used.toFixed(1)+"</b> / "+STATE.ram_total.toFixed(0)+" GB";
+      }
+      $("cpuLoad").textContent  = (STATE.cpu.tgt/100*16).toFixed(1)+"x";
+      $("diskFree").textContent = Math.round((100-STATE.disk.tgt)/100*1024)+"GB FREE";
+      break;
+    }
+
+    case "weather": {
+      if(msg.temp_f   != null) $("wxTempF").textContent = Math.round(+msg.temp_f);
+      if(msg.temp_c   != null) $("wxTempC").textContent = Math.round(+msg.temp_c);
+      if(msg.condition!= null) $("wxCond").textContent  = String(msg.condition).toUpperCase();
+      if(msg.humidity != null) $("wxHum").textContent   = Math.round(+msg.humidity);
+      if(msg.wind_kmh != null) $("wxWind").textContent  = Math.round(+msg.wind_kmh * 0.621371);
+      if(msg.location != null) $("wxLoc").textContent   = String(msg.location).toUpperCase();
+      break;
+    }
+
+    case "transcript": {
+      addMessage(msg.role === "user" ? "user" : "assistant", String(msg.text||""));
+      // The question also goes on the stage, twice the size, the instant
+      // Whisper produces it — so a misheard question is obvious during the
+      // think rather than after the answer.
+      if(msg.role === "user") setHeard(String(msg.text||""));
+      break;
+    }
+
+    case "detail": {
+      showDetail(msg);
+      break;
+    }
+
+    case "reasoning": {
+      setReasoning(String(msg.text || ""));
+      thoughtFeed(String(msg.text || ""));
+      break;
+    }
+
+    case "queue": {
+      applyQueue(msg.waiting, msg.text, msg.since);
+      break;
+    }
+
+    case "tool": {
+      applyTool(msg.name, msg.active, msg.since);
+      break;
+    }
+
+    case "brain": {
+      applyBrain(msg);
+      break;
+    }
+
+    case "reload": {
+      location.reload();   // auto-refresh when the HUD file changes
+      break;
+    }
+  }
+}
+
+/* ---- live reasoning overlay ("watch it think") ----
+   The model streams tokens far faster than anyone can read, so we buffer the
+   full text and REVEAL it at a steady, readable pace in a scrolling console. */
+var _reasonFull = "", _reasonShown = 0;
+function setReasoning(text){
+  var el = $("reasoning");
+  if(!el) return;
+  text = String(text || "").replace(/\s+/g, " ");
+  if(!text.trim()){
+    _reasonFull = ""; _reasonShown = 0;
+    el.classList.remove("on");
+    el.innerHTML = "";
+    return;
+  }
+  _reasonFull = text;          // newest full reasoning so far
+  el.classList.add("on");
+}
+setInterval(function(){
+  var el = $("reasoning");
+  if(!el || !_reasonFull) return;
+  if(_reasonShown < _reasonFull.length){
+    _reasonShown = Math.min(_reasonFull.length, _reasonShown + 2);   // ~45 chars/sec
+    el.innerHTML = '<span class="rlabel">◢ REASONING</span>' +
+      escapeHtml(_reasonFull.slice(0, _reasonShown)) +
+      '<span class="rcaret">▍</span>';
+    el.scrollTop = el.scrollHeight;   // keep the latest line in view
+  }
+}, 45);
+
+/* ---- conversation log (keep last 5, fade older) ---- */
+const FEED_MAX = 5;
+function addMessage(role, text){
+  const feed = $("feed");
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  el.innerHTML = '<span class="who">'+(role==="user"?"YOU ›":"Bastion ›")+'</span> <span class="txt"></span>';
+  el.querySelector(".txt").textContent = " " + text;
+  feed.appendChild(el);
+  while(feed.children.length > FEED_MAX) feed.removeChild(feed.firstChild);
+  // fade older messages
+  const kids = feed.children, n = kids.length;
+  for(let i=0;i<n;i++){ kids[i].style.opacity = clamp(0.25 + (i/(n-1||1))*0.75, 0.25, 1).toFixed(2); }
+}
+
+/* ============================================================
+   CLOCK  (blinking colon)
+   ============================================================ */
+const clockEl = $("clock");
+const colons = clockEl.querySelectorAll(".colon");
+function tickClock(){
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2,"0");
+  const mm = String(d.getMinutes()).padStart(2,"0");
+  const ss = String(d.getSeconds()).padStart(2,"0");
+  // rebuild only the digit text nodes to keep colon spans
+  clockEl.childNodes[0].nodeValue = hh;
+  clockEl.childNodes[2].nodeValue = mm;
+  clockEl.childNodes[4].nodeValue = ss;
+  const off = d.getMilliseconds() < 500;
+  colons.forEach(c => c.classList.toggle("off", off));
+  const days=["SUN","MON","TUE","WED","THU","FRI","SAT"];
+  const mons=["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  $("dateLine").textContent = days[d.getDay()]+" · "+String(d.getDate()).padStart(2,"0")+" "+mons[d.getMonth()]+" "+d.getFullYear();
+}
+setInterval(tickClock, 120); tickClock();
+
+/* ============================================================
+   RADIAL GAUGES
+   ============================================================ */
+const gaugeCanvases = Array.from(document.querySelectorAll("canvas[data-gauge]")).map(c => ({
+  key:c.dataset.gauge, ctx:c.getContext("2d"), w:c.width, h:c.height
+}));
+function drawGauge(g){
+  const {ctx,w,h,key} = g;
+  const val = STATE[key].cur;
+  const cx=w/2, cy=h/2, r=58;
+  ctx.clearRect(0,0,w,h);
+  const start = Math.PI*0.75, end = Math.PI*2.25; // 270° arc
+  // track
+  ctx.lineWidth=6; ctx.lineCap="round";
+  ctx.strokeStyle="rgba(69,169,232,0.10)";
+  ctx.beginPath(); ctx.arc(cx,cy,r,start,end); ctx.stroke();
+  // segmented ticks
+  const segs=40;
+  for(let i=0;i<segs;i++){
+    const a=lerp(start,end,i/(segs-1));
+    const on = (i/(segs-1))*100 <= val;
+    ctx.strokeStyle = on ? "rgba(69,169,232,0.9)" : "rgba(69,169,232,0.10)";
+    ctx.lineWidth = on ? 2 : 1.5;
+    const r1=r-12, r2=r-6;
+    ctx.beginPath();
+    ctx.moveTo(cx+Math.cos(a)*r1, cy+Math.sin(a)*r1);
+    ctx.lineTo(cx+Math.cos(a)*r2, cy+Math.sin(a)*r2);
+    ctx.stroke();
+  }
+  // value arc with glow
+  const va = lerp(start,end,val/100);
+  ctx.save();
+  ctx.shadowColor="rgba(69,169,232,0.8)"; ctx.shadowBlur=10;
+  ctx.lineWidth=4; ctx.strokeStyle = val>90 ? "#d98a2b" : "#45A9E8";
+  ctx.beginPath(); ctx.arc(cx,cy,r,start,va); ctx.stroke();
+  ctx.restore();
+  // head dot
+  ctx.fillStyle="#DCE6F0";
+  ctx.beginPath(); ctx.arc(cx+Math.cos(va)*r, cy+Math.sin(va)*r, 2.6, 0, TAU); ctx.fill();
+}
+function updateGaugeText(){
+  $("cpuVal").textContent  = Math.round(STATE.cpu.cur);
+  $("gpuVal").textContent  = Math.round(STATE.gpu.cur);
+  $("ramVal").textContent  = Math.round(STATE.ram.cur);
+  $("diskVal").textContent = Math.round(STATE.disk.cur);
+}
+
+/* ============================================================
+   ARC REACTOR  (center)
+   ============================================================ */
+const reactor = $("reactor");
+const rctx = reactor.getContext("2d");
+const RW = reactor.width, RH = reactor.height, RCX=RW/2, RCY=RH/2;
+const BARS = 72;
+const barVal = new Float32Array(BARS);
+
+function drawReactor(t){
+  rctx.clearRect(0,0,RW,RH);
+  const e = STATE.energy;
+  const speed = 0.4 + e*1.6;
+
+  // faint targeting reticle
+  rctx.save();
+  rctx.strokeStyle="rgba(69,169,232,0.10)"; rctx.lineWidth=1;
+  rctx.beginPath(); rctx.moveTo(RCX-300,RCY); rctx.lineTo(RCX-120,RCY);
+  rctx.moveTo(RCX+120,RCY); rctx.lineTo(RCX+300,RCY);
+  rctx.moveTo(RCX,RCY-300); rctx.lineTo(RCX,RCY-120);
+  rctx.moveTo(RCX,RCY+120); rctx.lineTo(RCX,RCY+300); rctx.stroke();
+  rctx.restore();
+
+  // outer rotating tick ring
+  rctx.save(); rctx.translate(RCX,RCY); rctx.rotate(t*0.00006*speed);
+  const ticks=90, R=290;
+  for(let i=0;i<ticks;i++){
+    const a=(i/ticks)*TAU; const major=(i%5===0);
+    rctx.strokeStyle = major?"rgba(69,169,232,0.45)":"rgba(69,169,232,0.16)";
+    rctx.lineWidth = major?2:1;
+    const r1=R-(major?14:7), r2=R;
+    rctx.beginPath();
+    rctx.moveTo(Math.cos(a)*r1,Math.sin(a)*r1);
+    rctx.lineTo(Math.cos(a)*r2,Math.sin(a)*r2);
+    rctx.stroke();
+  }
+  rctx.restore();
+
+  // segmented arcs (two counter-rotating rings)
+  drawSegRing(t*0.0002*speed,  235, 0.55, 6, "rgba(69,169,232,0.55)");
+  drawSegRing(-t*0.00015*speed,205, 0.40, 4, "rgba(123,111,160,0.5)");
+
+  // radial spectrum waveform
+  rctx.save(); rctx.translate(RCX,RCY);
+  const baseR=120, maxLen=70;
+  for(let i=0;i<BARS;i++){
+    const a=(i/BARS)*TAU - Math.PI/2;
+    const len = barVal[i]*maxLen;
+    const r1=baseR, r2=baseR+len;
+    const g=rctx.createLinearGradient(Math.cos(a)*r1,Math.sin(a)*r1,Math.cos(a)*r2,Math.sin(a)*r2);
+    g.addColorStop(0,"rgba(69,169,232,0.15)");
+    g.addColorStop(1, STATE.assistant==="listening" ? "rgba(123,111,160,0.95)" : "rgba(69,169,232,0.95)");
+    rctx.strokeStyle=g; rctx.lineWidth=3; rctx.lineCap="round";
+    rctx.beginPath();
+    rctx.moveTo(Math.cos(a)*r1,Math.sin(a)*r1);
+    rctx.lineTo(Math.cos(a)*r2,Math.sin(a)*r2);
+    rctx.stroke();
+  }
+  rctx.restore();
+
+  // inner rotating rings
+  drawRing(110, "rgba(69,169,232,0.30)", 1.5);
+  drawRing(95,  "rgba(69,169,232,0.18)", 1);
+
+  // glowing core
+  const pulse = 0.5 + 0.5*Math.sin(t*0.002*(0.5+e*2));
+  const coreR = 60 + pulse*8*e;
+  const grad = rctx.createRadialGradient(RCX,RCY,2, RCX,RCY,coreR+40);
+  grad.addColorStop(0, "rgba(255,236,200,"+(0.85*(0.5+e*0.5))+")");
+  grad.addColorStop(0.25,"rgba(69,169,232,"+(0.7*(0.4+e*0.6))+")");
+  grad.addColorStop(0.6,"rgba(69,169,232,0.12)");
+  grad.addColorStop(1,"rgba(69,169,232,0)");
+  rctx.fillStyle=grad;
+  rctx.beginPath(); rctx.arc(RCX,RCY,coreR+40,0,TAU); rctx.fill();
+
+  // core triangle (Stark vibe) — three arc segments around core
+  rctx.save(); rctx.translate(RCX,RCY); rctx.rotate(-t*0.0004*speed);
+  rctx.strokeStyle="rgba(255,240,210,0.85)"; rctx.lineWidth=3; rctx.lineCap="round";
+  for(let i=0;i<3;i++){
+    const a0 = i*(TAU/3)+0.25, a1=a0+(TAU/3)-0.5;
+    rctx.beginPath(); rctx.arc(0,0,46,a0,a1); rctx.stroke();
+  }
+  rctx.restore();
+
+  // bright center
+  rctx.fillStyle="rgba(255,244,224,"+(0.55+e*0.4)+")";
+  rctx.beginPath(); rctx.arc(RCX,RCY,16+pulse*4,0,TAU); rctx.fill();
+}
+function drawSegRing(rot, R, alpha, segCount, color){
+  rctx.save(); rctx.translate(RCX,RCY); rctx.rotate(rot);
+  rctx.strokeStyle=color; rctx.lineWidth=4; rctx.lineCap="butt";
+  const gap=0.18;
+  for(let i=0;i<segCount;i++){
+    const a0=(i/segCount)*TAU + gap;
+    const a1=((i+1)/segCount)*TAU - gap;
+    rctx.beginPath(); rctx.arc(0,0,R,a0,a1); rctx.stroke();
+  }
+  rctx.restore();
+}
+function drawRing(R,color,lw){
+  rctx.strokeStyle=color; rctx.lineWidth=lw;
+  rctx.beginPath(); rctx.arc(RCX,RCY,R,0,TAU); rctx.stroke();
+}
+
+/* ---- corner ring accents ---- */
+const accents = [ {c:$("ringTL"),dir:1}, {c:$("ringBR"),dir:-1} ].map(o=>({
+  ctx:o.c.getContext("2d"), w:o.c.width, h:o.c.height, dir:o.dir
+}));
+function drawAccent(a,t){
+  const {ctx,w,h,dir}=a; ctx.clearRect(0,0,w,h);
+  const cx=w/2, cy=h/2;
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(dir*t*0.0003);
+  ctx.strokeStyle="rgba(69,169,232,0.30)"; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(0,0,30,0.3,2.4); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0,0,30,3.5,5.6); ctx.stroke();
+  ctx.strokeStyle="rgba(123,111,160,0.4)"; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(0,0,20,1.0,3.4); ctx.stroke();
+  ctx.fillStyle="rgba(69,169,232,0.7)";
+  ctx.beginPath(); ctx.arc(38,0,2,0,TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* ============================================================
+   HEX GRID BACKGROUND (static, drawn once)
+   ============================================================ */
+(function drawHex(){
+  const c=$("hexbg"), ctx=c.getContext("2d");
+  ctx.strokeStyle="rgba(69,169,232,0.5)"; ctx.lineWidth=1;
+  const s=46, htri=s*Math.sin(Math.PI/3);
+  for(let row=0, y=-s; y<c.height+s; row++, y+=htri){
+    const xoff = (row%2)? s*1.5 : 0;
+    for(let x=-s; x<c.width+s; x+=s*3){
+      hexPath(ctx, x+xoff, y, s); ctx.stroke();
+    }
+  }
+  function hexPath(ctx,cx,cy,s){
+    ctx.beginPath();
+    for(let i=0;i<6;i++){
+      const a=Math.PI/3*i+Math.PI/6;
+      const px=cx+Math.cos(a)*s, py=cy+Math.sin(a)*s;
+      i?ctx.lineTo(px,py):ctx.moveTo(px,py);
+    }
+    ctx.closePath();
+  }
+})();
+
+/* ============================================================
+   FILM GRAIN (animated low-res, scaled up by CSS)
+   ============================================================ */
+const grainC=$("grain"), gctx=grainC.getContext("2d");
+const grainImg=gctx.createImageData(grainC.width,grainC.height);
+let grainCount=0;
+function drawGrain(){
+  const d=grainImg.data;
+  for(let i=0;i<d.length;i+=4){
+    const v=(Math.random()*255)|0;
+    d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
+  }
+  gctx.putImageData(grainImg,0,0);
+}
+grainC.style.width="1920px"; grainC.style.height="1080px";
+
+/* ============================================================
+   TELEMETRY TICKER (decorative)
+   ============================================================ */
+(function buildTicker(){
+  const items = [
+    "NEURAL CORE 7B ONLINE","VEC INDEX 1.2M EMBEDDINGS","TLS HANDSHAKE OK",
+    "INFERENCE 42 TOK/S","CTX WINDOW 32768","TOOLCHAIN v3.9.1",
+    "AUDIO BUS 48KHZ / 24BIT","WAKE-WORD ENGINE ARMED","POWER DRAW 184W",
+    "FAN CURVE AUTO","UPTIME 16D 04H","PACKET LOSS 0.00%","ENTROPY POOL HEALTHY"
+  ];
+  const line = items.map(x=>'<span>◆</span> '+x).join("  ·  ");
+  $("tickerTrack").innerHTML = line + "  ·  " + line; // duplicated for seamless loop
+})();
+
+/* ============================================================
+   MAIN ANIMATION LOOP
+   ============================================================ */
+STATE.energyTarget = STATE_STYLE.link.energy;
+let last=0;
+function frame(t){
+  // smooth gauges
+  ["cpu","gpu","ram","disk"].forEach(k=>{ STATE[k].cur = lerp(STATE[k].cur, STATE[k].tgt, 0.08); });
+  updateGaugeText();
+  gaugeCanvases.forEach(drawGauge);
+
+  // energy easing
+  STATE.energy = lerp(STATE.energy, STATE.energyTarget, 0.04);
+
+  // spectrum bars react to energy
+  const e=STATE.energy;
+  for(let i=0;i<BARS;i++){
+    const noise = Math.abs(Math.sin(i*0.7 + t*0.004*(0.3+e*3)) * Math.cos(i*0.33 - t*0.002));
+    const target = (0.1 + noise*(0.15+e*0.85));
+    barVal[i] = lerp(barVal[i], clamp(target,0,1), 0.2);
+  }
+
+  drawReactor(t);
+  accents.forEach(a=>drawAccent(a,t));
+
+  // film grain disabled (see #grain display:none) — no per-frame noise draw
+
+  last=t;
+  requestAnimationFrame(frame);
+}
+if(REDUCED){
+  // draw a couple static frames
+  gaugeCanvases.forEach(drawGauge);
+  drawReactor(0);
+  accents.forEach(a=>drawAccent(a,0));
+} else {
+  requestAnimationFrame(frame);
+}
+
+/* ============================================================
+   LIVE WEBSOCKET FEED  →  ws://127.0.0.1:8765  (Bastion HUD bridge)
+   Same protocol the vertical HUD uses. applyData() handles every
+   message; the local clock above is authoritative (we ignore "time").
+   ============================================================ */
+function setConn(on){
+  const dot = $("connDot"), lbl = $("connText");
+  if(on){
+    dot.style.background = "var(--ok)";
+    dot.style.boxShadow  = "0 0 10px var(--ok)";
+    lbl.textContent = "LINK ESTABLISHED · 127.0.0.1:8765";
+  } else {
+    dot.style.background = "var(--warn)";
+    dot.style.boxShadow  = "0 0 10px var(--warn)";
+    lbl.textContent = "LINKING · 127.0.0.1:8765";
+  }
+}
+
+(function connectWS(){
+  const WS_URL = "ws://127.0.0.1:8765";
+  // Shared secret with hud_server.py (HUD_TOKEN there — keep the two identical).
+  // The server sends nothing until this arrives as the first frame.
+  // Per-install token, passed in the URL: index.html#token=... (see config.py)
+  const HUD_TOKEN = new URLSearchParams(location.hash.slice(1)).get("token") || "";
+  let ws = null, reconnectTimer = null, authed = false;
+
+  function connect(){
+    authed = false;
+    try { ws = new WebSocket(WS_URL); }
+    catch(e){ scheduleReconnect(); return; }
+
+    ws.onopen = () => {
+      try { ws.send(JSON.stringify({ type:"auth", token: HUD_TOKEN })); }
+      catch(e){ try { ws.close(); } catch(e2){} }
+    };
+    ws.onmessage = (ev) => {
+      let msg; try { msg = JSON.parse(ev.data); } catch(e){ return; }
+      if(msg.type === "auth_ok"){
+        authed = true; setConn(true);
+        // The snapshot that follows carries the real state; until it lands,
+        // stop saying the link is still being established.
+        if(STATE.assistant === "link") applyState("idle");
+        return;
+      }
+      if(!authed) return;   // nothing is trusted before the handshake completes
+      applyData(msg);   // {type:"state"|"stats"|"weather"|"transcript"|...}
+    };
+    ws.onclose = (ev) => {
+      authed = false;
+      setConn(false);
+      // The stage is only true while the feed is live. Leaving "THINKING" up
+      // after the server has gone is the one lie this panel must not tell —
+      // and the server restarts far more often than the wallpaper does.
+      applyState("link");
+      // Same rule for the queue band: "your question is next" is a promise, and
+      // with the server gone there is nothing left to keep it.
+      applyQueue(0);
+      // And the tool line: "look_at_screen, 40.2s" with the server gone is the
+      // same stale claim as a stuck THINKING.
+      applyTool("");
+      // The brain band is the exception to that rule. State and tool are claims
+      // about this instant, so with the server gone they are lies; which brain
+      // is loaded is CONFIGURATION and does not change because a socket blipped.
+      // Blanking it would drop the privacy indicator exactly when the HUD is
+      // least able to replace it, so it stays and goes dim instead.
+      const bb = $("brainBar");
+      if(bb && brainState) bb.className += " stale";
+      // 4401 = the server rejected our token. Back off harder so a mismatched
+      // token doesn't hammer the socket, but keep trying.
+      scheduleReconnect(ev && ev.code === 4401 ? 15000 : 2000);
+    };
+    ws.onerror = () => { try { ws.close(); } catch(e){} };
+  }
+  function scheduleReconnect(delay){
+    if(reconnectTimer) return;
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, delay || 2000);
+  }
+
+  setConn(false);
+  applyState("link");    // honest boot state until the handshake completes
+  connect();
+})();
+</script>
+</body>
+</html>
